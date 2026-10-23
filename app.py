@@ -15,7 +15,7 @@ st.set_page_config(page_title="Lithography & Profile Tools", layout="wide")
 st.sidebar.title("Navigation")
 app_mode = st.sidebar.radio("Select Tool", [
     "2D Wedge Prism Inspector", 
-    "3D Lens Simulator", 
+    "2D Lens Inspector", 
     "3D Grayscale Simulator"
 ])
 st.sidebar.markdown("---")
@@ -78,7 +78,7 @@ if app_mode == "2D Wedge Prism Inspector":
 # ==========================================
 # 3. 두 번째 툴: 신규 2D 렌즈 검사기
 # ==========================================
-elif app_mode == "3D Lens Simulator":
+elif app_mode == "2D Lens Inspector":
     st.title("Micro-Lens Profile Comparison Tool")
     st.write("마이크로 렌즈 측정 데이터(CSV)를 직경(Dia)과 깊이(Sag) 기반 디자인 스펙과 비교합니다.")
 
