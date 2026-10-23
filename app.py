@@ -15,7 +15,7 @@ st.set_page_config(page_title="Lithography & Profile Tools", layout="wide")
 st.sidebar.title("Navigation")
 app_mode = st.sidebar.radio("Select Tool", [
     "2D Wedge Prism Inspector", 
-    "2D Lens Profile Inspector", 
+    "3D Lens Simulator", 
     "3D Grayscale Simulator"
 ])
 st.sidebar.markdown("---")
