@@ -46,7 +46,13 @@ if app_mode == "2D Wedge Prism Inspector":
 
     if uploaded_file_prism is not None:
         try:
-            df = pd.read_csv(uploaded_file_prism)
+            # UTF-8과 CP949 자동 감지 (한글 깨짐 방지)
+            try:
+                df = pd.read_csv(uploaded_file_prism, encoding='utf-8')
+            except UnicodeDecodeError:
+                uploaded_file_prism.seek(0)
+                df = pd.read_csv(uploaded_file_prism, encoding='cp949')
+
             x_col = df.columns[0]
             y_col = df.columns[1]
             
@@ -55,6 +61,9 @@ if app_mode == "2D Wedge Prism Inspector":
             align_x = st.sidebar.checkbox("X축 중앙 정렬 (Center X)", value=True)
             align_y = st.sidebar.checkbox("Y축 표면 정렬 (Align Top to 0)", value=True)
             
+            # 새로 추가된 수동 이동 기능
+            x_shift = st.sidebar.number_input("수동 X축 이동 (X Shift, ㎛)", value=0.0, step=1.0)
+            
             x_data = df[x_col].copy()
             y_data = df[y_col].copy()
             
@@ -62,6 +71,9 @@ if app_mode == "2D Wedge Prism Inspector":
                 x_data = x_data - (x_data.max() + x_data.min()) / 2
             if align_y:
                 y_data = y_data - y_data.max()
+                
+            # 수동 입력한 값만큼 X축 이동 적용
+            x_data = x_data + x_shift
                 
             ax.plot(x_data, y_data, color='blue', linewidth=1.5, label='Measured Profile')
         except Exception as e:
