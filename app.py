@@ -28,9 +28,27 @@ if app_mode == "2D Wedge Prism Inspector":
     st.write("음각(Negative) 비대칭 웻지 프리즘 측정 데이터를 디자인 스펙과 비교합니다.")
 
     st.sidebar.header("Design Specifications")
-    slope_width = st.sidebar.number_input("Slope Width (um)", value=50.0)
-    steep_width = st.sidebar.number_input("Steep Width (um)", value=10.0)
-    depth = st.sidebar.number_input("Depth / Sag (um)", value=50.0)
+    
+    # 공통으로 사용하는 Depth 먼저 입력받기
+    depth = st.sidebar.number_input("Depth / Sag (um)", value=50.0, step=1.0)
+    
+    # 입력 방식 선택 메뉴 추가
+    input_method = st.sidebar.radio("스펙 입력 방식", ["Width (폭) 직접 입력", "Angle (각도) 계산"])
+    
+    if input_method == "Width (폭) 직접 입력":
+        slope_width = st.sidebar.number_input("Slope Width (um)", value=50.0)
+        steep_width = st.sidebar.number_input("Steep Width (um)", value=10.0)
+    else:
+        # 각도 입력 시 자동 계산 로직
+        slope_angle = st.sidebar.number_input("완만한 경사각 (Slope Angle, °)", value=45.0, step=1.0)
+        steep_angle = st.sidebar.number_input("가파른 경사각 (Steep Angle, °)", value=78.0, step=1.0)
+        
+        # 삼각함수 Width = Depth / tan(θ) 적용
+        slope_width = depth / np.tan(np.radians(slope_angle)) if slope_angle < 90 else 0.0
+        steep_width = depth / np.tan(np.radians(steep_angle)) if steep_angle < 90 else 0.0
+        
+        # 자동 계산된 값을 사이드바에 안내
+        st.sidebar.info(f"💡 자동 계산된 폭:\n- Slope Width: {slope_width:.2f} ㎛\n- Steep Width: {steep_width:.2f} ㎛")
 
     total_w = slope_width + steep_width
     start_x = -total_w / 2
@@ -61,7 +79,7 @@ if app_mode == "2D Wedge Prism Inspector":
             align_x = st.sidebar.checkbox("X축 중앙 정렬 (Center X)", value=True)
             align_y = st.sidebar.checkbox("Y축 표면 정렬 (Align Top to 0)", value=True)
             
-            # 새로 추가된 수동 이동 기능
+            # 수동 X축 이동 기능 유지
             x_shift = st.sidebar.number_input("수동 X축 이동 (X Shift, ㎛)", value=0.0, step=1.0)
             
             x_data = df[x_col].copy()
@@ -86,7 +104,6 @@ if app_mode == "2D Wedge Prism Inspector":
     ax.axis('equal') 
     
     st.pyplot(fig, use_container_width=True)
-
 # ==========================================
 # 3. 두 번째 툴: 신규 2D 렌즈 검사기
 # ==========================================
