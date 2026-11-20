@@ -105,80 +105,166 @@ if app_mode == "2D Wedge Prism Inspector":
     
     st.pyplot(fig, use_container_width=True)
 # ==========================================
-# 3. 두 번째 툴: 신규 2D 렌즈 검사기
+# 3. 두 번째 툴: 신규 2D 렌즈 검사기 (비구면 Conic K 지원)
 # ==========================================
 elif app_mode == "2D Lens Inspector":
     st.title("Micro-Lens Profile Comparison Tool")
-    st.write("마이크로 렌즈 측정 데이터(CSV)를 직경(Dia)과 깊이(Sag) 기반 디자인 스펙과 비교합니다.")
+    st.write("마이크로 렌즈 측정 데이터(CSV)를 직경(Dia), 깊이(Sag)/곡률반경(RoC), Conic 상수(K) 기반 디자인 스펙과 비교합니다.")
 
+    # --- 헬퍼 함수 ---
+    def load_csv_safe(file_obj):
+        encodings = ["utf-8-sig", "utf-8", "cp949", "euc-kr", "latin1"]
+        last_err = None
+        for enc in encodings:
+            try:
+                file_obj.seek(0)
+                return pd.read_csv(file_obj, encoding=enc)
+            except UnicodeDecodeError as e:
+                last_err = e
+        raise last_err
+
+    def calc_conic_sag(r_arr, roc_val, k_val):
+        disc = 1.0 - (1.0 + k_val) * (r_arr / roc_val) ** 2
+        if np.any(disc < -1e-9):
+            return None
+        disc = np.maximum(disc, 0.0)
+        return (r_arr ** 2 / roc_val) / (1.0 + np.sqrt(disc))
+
+    # --- 1. 사이드바: Lens Specifications ---
     st.sidebar.header("Lens Specifications")
-    lens_dia = st.sidebar.number_input("Diameter (Dia, ㎛)", value=4.0, step=0.1)
-    lens_sag = st.sidebar.number_input("Sag (Height/Depth, ㎛)", value=2.0, step=0.1)
+
+    spec_mode = st.sidebar.radio(
+        "스펙 입력 방식",
+        ["Dia + Sag + K (R 자동 계산)", "Dia + RoC + K (Sag 자동 계산)"]
+    )
+
+    lens_dia = st.sidebar.number_input("Diameter (Dia, μm)", min_value=0.1, value=100.0, step=1.0, format="%.2f")
+    r_max = lens_dia / 2.0
+
+    conic_k = st.sidebar.number_input(
+        "Conic Constant (K)",
+        value=0.0000,
+        step=0.1000,
+        format="%.4f",
+        help="0: 구면, -1: 포물면, -1 미만: 쌍곡면, -1~0: 장축타원, 0 초과: 단축타원"
+    )
+
+    valid_spec = True
+    error_msg = ""
+
+    if spec_mode == "Dia + Sag + K (R 자동 계산)":
+        lens_sag = st.sidebar.number_input("Sag (Height/Depth, μm)", min_value=0.01, value=40.0, step=1.0, format="%.2f")
+        k_min = -1.0 - (r_max / lens_sag) ** 2
+        k_max = (r_max / lens_sag) ** 2 - 1.0
+
+        if conic_k <= k_min or conic_k > k_max:
+            valid_spec = False
+            error_msg = (
+                f"현재 Dia({lens_dia:.1f} μm), Sag({lens_sag:.1f} μm) 조건에서 입력 가능한 "
+                f"Conic K 범위는 ({k_min:.3f} 초과 ~ {k_max:.3f} 이하)입니다."
+            )
+            R_val = np.nan
+        else:
+            R_val = (r_max ** 2 + (1.0 + conic_k) * (lens_sag ** 2)) / (2.0 * lens_sag)
+    else:
+        R_val = st.sidebar.number_input("Radius of Curvature (RoC, μm)", min_value=0.01, value=51.25, step=1.0, format="%.3f")
+        edge_sag = calc_conic_sag(np.array([r_max]), R_val, conic_k)
+        if edge_sag is None:
+            valid_spec = False
+            error_msg = "입력한 Dia, RoC, Conic K 조합에서는 렌즈 외곽이 정의되지 않습니다."
+            lens_sag = np.nan
+        else:
+            lens_sag = float(edge_sag[0])
+
     lens_tone = st.sidebar.radio("Lens Tone", ["Concave (음각, 아래로 파임)", "Convex (양각, 위로 볼록)"])
 
-    # 곡률 반경(R) 계산
-    r = lens_dia / 2
-    if lens_sag > 0:
-        R_val = (r**2 + lens_sag**2) / (2 * lens_sag)
+    if valid_spec:
+        if spec_mode.startswith("Dia + Sag"):
+            st.sidebar.success(f"💡 Calculated RoC (R값): **{R_val:.3f} μm**")
+        else:
+            st.sidebar.success(f"💡 Calculated Sag: **{lens_sag:.3f} μm**")
     else:
-        R_val = 0.0
+        st.sidebar.error(error_msg)
 
-    st.sidebar.markdown("---")
-    st.sidebar.success(f"💡 Calculated RoC (R값): **{R_val:.3f} ㎛**")
+    # --- 2. CSV 업로드 ---
+    uploaded_file = st.file_uploader("측정 데이터 CSV 업로드 (첫 번째 열 X, 두 번째 열 Y)", type=["csv"])
 
-    # 이상적인 렌즈 곡선(Circle Eq) 생성
-    x_lens = np.linspace(-r, r, 500)
-    if "Concave" in lens_tone:
-        y_lens = -np.sqrt(R_val**2 - x_lens**2) + R_val - lens_sag
-    else:
-        y_lens = np.sqrt(R_val**2 - x_lens**2) - R_val + lens_sag
-
-    # 좌우 평탄면(여백) 추가
-    margin = lens_dia * 0.5
-    x_left = np.linspace(-r - margin, -r, 50)
-    y_left = np.zeros_like(x_left)
-    x_right = np.linspace(r, r + margin, 50)
-    y_right = np.zeros_like(x_right)
-
-    ideal_x = np.concatenate([x_left, x_lens, x_right])
-    ideal_y = np.concatenate([y_left, y_lens, y_right])
-
-    uploaded_file_lens = st.file_uploader("측정 데이터 CSV 업로드 (첫 번째 열 X, 두 번째 열 Y)", type=['csv'])
-
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(ideal_x, ideal_y, color='red', linestyle='--', linewidth=2, 
-            label=f'Design Spec\n(Dia: {lens_dia}㎛, Sag: {lens_sag}㎛, R: {R_val:.2f}㎛)')
-
-    if uploaded_file_lens is not None:
+    x_meas, y_meas = None, None
+    if uploaded_file is not None:
         try:
-            df = pd.read_csv(uploaded_file_lens)
-            x_col = df.columns[0]
-            y_col = df.columns[1]
-            
-            st.sidebar.markdown("---")
-            st.sidebar.header("Alignment Options")
-            align_x = st.sidebar.checkbox("X축 중앙 정렬 (Center X)", value=True)
-            align_y = st.sidebar.checkbox("Y축 표면 정렬 (Align Top to 0)", value=True)
-            
-            x_data = df[x_col].copy()
-            y_data = df[y_col].copy()
-            
-            if align_x:
-                x_data = x_data - (x_data.max() + x_data.min()) / 2
-            if align_y:
-                y_data = y_data - y_data.max()
-                
-            ax.plot(x_data, y_data, color='blue', linewidth=1.5, label='Measured Profile')
+            df = load_csv_safe(uploaded_file)
+            raw_x = pd.to_numeric(df.iloc[:, 0], errors="coerce")
+            raw_y = pd.to_numeric(df.iloc[:, 1], errors="coerce")
+            valid_rows = raw_x.notna() & raw_y.notna()
+            x_meas = raw_x[valid_rows].to_numpy()
+            y_meas = raw_y[valid_rows].to_numpy()
+
+            order = np.argsort(x_meas)
+            x_meas, y_meas = x_meas[order], y_meas[order]
         except Exception as e:
             st.error(f"CSV 로드 오류: {e}")
 
-    ax.set_xlabel("X Position (㎛)")
-    ax.set_ylabel("Depth / Height (㎛)")
-    ax.legend(loc='upper right')
-    ax.grid(True, linestyle=':', alpha=0.7)
-    ax.axis('equal') 
-    
-    st.pyplot(fig, use_container_width=True)
+    # --- 3. 측정 데이터 정렬 옵션 ---
+    if x_meas is not None and len(x_meas) > 0:
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("Alignment Settings")
+        auto_center_x = st.sidebar.checkbox("X축 중앙 자동 정렬", value=True)
+        auto_zero_y = st.sidebar.checkbox("Y축 기준면(0) 자동 정렬", value=True)
+        x_offset = st.sidebar.number_input("X 미세 오프셋 (μm)", value=0.0, step=0.5, format="%.2f")
+        y_offset = st.sidebar.number_input("Y 미세 오프셋 (μm)", value=0.0, step=0.5, format="%.2f")
+
+        if auto_center_x:
+            if "Concave" in lens_tone:
+                center_x = x_meas[np.argmin(y_meas)]
+            else:
+                center_x = x_meas[np.argmax(y_meas)]
+            x_meas = x_meas - center_x
+
+        if auto_zero_y:
+            edge_n = max(1, int(len(y_meas) * 0.1))
+            baseline = np.median(np.concatenate([y_meas[:edge_n], y_meas[-edge_n:]]))
+            y_meas = y_meas - baseline
+
+        x_meas = x_meas + x_offset
+        y_meas = y_meas + y_offset
+
+    # --- 4. 디자인 프로파일 생성 및 그래프 출력 ---
+    if not valid_spec:
+        st.warning("사이드바의 렌즈 스펙(Dia, Sag/RoC, Conic K)을 유효한 범위로 조정해 주세요.")
+    else:
+        margin = r_max * 0.5
+        x_design = np.linspace(-(r_max + margin), r_max + margin, 1000)
+        y_design = np.zeros_like(x_design)
+
+        in_lens = np.abs(x_design) <= r_max
+        r_vals = np.abs(x_design[in_lens])
+        z_profile = calc_conic_sag(r_vals, R_val, conic_k)
+
+        if "Concave" in lens_tone:
+            y_design[in_lens] = z_profile - lens_sag
+        else:
+            y_design[in_lens] = lens_sag - z_profile
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+
+        spec_label = (
+            rf"Design Spec (Dia: {lens_dia:.1f} $\mu\mathrm{{m}}$, "
+            rf"Sag: {lens_sag:.1f} $\mu\mathrm{{m}}$, "
+            rf"R: {R_val:.2f} $\mu\mathrm{{m}}$, K: {conic_k:.3f})"
+        )
+        ax.plot(x_design, y_design, "r--", linewidth=2, label=spec_label)
+
+        if x_meas is not None and len(x_meas) > 0:
+            ax.plot(x_meas, y_meas, "b-", linewidth=1.5, alpha=0.85, label="Measured Profile (CSV)")
+
+        ax.set_xlabel(r"Position ($\mu\mathrm{m}$)")
+        ax.set_ylabel(r"Depth / Height ($\mu\mathrm{m}$)")
+        ax.grid(True, linestyle=":", alpha=0.6)
+        ax.legend(loc="best")
+        ax.set_aspect("equal", adjustable="datalim")
+
+        st.pyplot(fig)
+        plt.close(fig)
 
 # ==========================================
 # 4. 세 번째 툴: 신규 10-bit 3D 시뮬레이터
